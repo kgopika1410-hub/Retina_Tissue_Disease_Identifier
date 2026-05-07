@@ -142,7 +142,7 @@ def predict_dr(
     image: np.ndarray,
     use_crop: bool,
     use_enhance: bool,
-) -> tuple[str, dict]:
+) -> tuple[str, dict[str, float]]:
     if image is None:
         return "Please upload an image.", {}
 
