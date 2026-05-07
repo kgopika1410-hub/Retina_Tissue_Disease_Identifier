@@ -71,6 +71,13 @@ async def predict(
     try:
         content = await file.read()
         image_rgb = decode_image_bytes(content)
+        # attempt to surface which model is loaded for diagnostics
+        try:
+            from dr_web_core import LOADED_MODEL_PATH
+            loaded_path = str(LOADED_MODEL_PATH) if LOADED_MODEL_PATH is not None else None
+        except Exception:
+            loaded_path = None
+
         result = predict_image(
             image_rgb=image_rgb,
             root_dir=ROOT_DIR,
@@ -78,9 +85,16 @@ async def predict(
             use_enhance=use_enhance,
             use_tta=use_tta,
         )
+        # attach diagnostics for easier debugging of deployment mismatches
+        if isinstance(result, dict):
+            result.setdefault("_debug", {})
+            result["_debug"]["loaded_model_path"] = loaded_path
+            result["_debug"]["model_candidates_env"] = os.getenv("MODEL_PATH", "")
         return JSONResponse(result)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
+        import traceback
+        tb = traceback.format_exc()
+        return JSONResponse({"error": str(exc), "traceback": tb}, status_code=400)
 
 
 demo = create_demo()
