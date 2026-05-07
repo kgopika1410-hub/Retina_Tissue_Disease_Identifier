@@ -74,7 +74,7 @@ def prepare_image(
 def load_model(model_path: Path) -> tf.keras.Model:
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")
-    return tf.keras.models.load_model(model_path)
+    return tf.keras.models.load_model(model_path, compile=False)
 
 
 ROOT_DIR = Path(__file__).resolve().parent
