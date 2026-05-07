@@ -209,9 +209,10 @@ with gr.Blocks(title="Diabetic Retinopathy Classifier") as demo:
 
 
 if __name__ == "__main__":
-    server_port = int(os.getenv("GRADIO_SERVER_PORT", "7860"))
+    # Prefer the PORT env var (Render exposes this); fall back to GRADIO_SERVER_PORT
+    server_port = int(os.getenv("PORT", os.getenv("GRADIO_SERVER_PORT", "7860")))
+    # Default to 127.0.0.1 locally, but bind to 0.0.0.0 when running on Render
     server_name = os.getenv("GRADIO_SERVER_NAME", "127.0.0.1")
-    # For Render deployment, bind to 0.0.0.0 to accept external connections
     if os.getenv("RENDER"):
         server_name = "0.0.0.0"
     demo.launch(
