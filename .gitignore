@@ -40,7 +40,9 @@ env/
 APTOS\ 2019\ dataset/
 outputs/
 outputs_run2/
-outputs_improved/
+outputs_improved/*
+# But allow .keras model files (trained models)
+!outputs_improved/*.keras
 
 # Gradio/Streamlit
 .gradio/
