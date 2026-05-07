@@ -78,10 +78,19 @@ def load_model(model_path: Path) -> "tf.keras.Model":
         raise FileNotFoundError(f"Model not found: {model_path}")
     # Import TensorFlow lazily so importing this module doesn't require TF at startup
     import tensorflow as tf
+    import traceback
+
+    print(f"Attempting to load model from {model_path}")
+    try:
+        print("TensorFlow version:", tf.__version__, "Keras version:", tf.keras.__version__)
+    except Exception:
+        pass
 
     try:
         return tf.keras.models.load_model(model_path, compile=False)
     except Exception as exc:
+        print("Initial model load failed:", exc)
+        traceback.print_exc()
         # Compatibility path for legacy BatchNormalization configs that include
         # renorm-related fields unsupported by some Keras runtimes.
         if "BatchNormalization" not in str(exc) and "renorm" not in str(exc):
@@ -96,11 +105,17 @@ def load_model(model_path: Path) -> "tf.keras.Model":
                 cfg.pop("renorm_momentum", None)
                 return super().from_config(cfg)
 
-        return tf.keras.models.load_model(
-            model_path,
-            compile=False,
-            custom_objects={"BatchNormalization": CompatBatchNormalization},
-        )
+        try:
+            print("Attempting compatibility load with CompatBatchNormalization")
+            return tf.keras.models.load_model(
+                model_path,
+                compile=False,
+                custom_objects={"BatchNormalization": CompatBatchNormalization},
+            )
+        except Exception as exc2:
+            print("Compatibility load failed:", exc2)
+            traceback.print_exc()
+            raise
 
 
 ROOT_DIR = Path(__file__).resolve().parent

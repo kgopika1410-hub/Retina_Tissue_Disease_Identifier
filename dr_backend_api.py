@@ -29,6 +29,38 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/status")
+def status() -> JSONResponse:
+    import subprocess
+    import json
+    import tensorflow as tf
+
+    commit = None
+    try:
+        commit = (
+            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]) .decode().strip()
+        )
+    except Exception:
+        commit = None
+
+    model_path = None
+    try:
+        # dr_web_core exports LOADED_MODEL_PATH when model is loaded
+        from dr_web_core import LOADED_MODEL_PATH
+
+        model_path = str(LOADED_MODEL_PATH) if LOADED_MODEL_PATH is not None else None
+    except Exception:
+        model_path = None
+
+    info = {
+        "commit": commit,
+        "tensorflow": tf.__version__,
+        "keras": tf.keras.__version__,
+        "model_path": model_path,
+    }
+    return JSONResponse(info)
+
+
 @app.post("/predict")
 async def predict(
     file: UploadFile = File(...),
