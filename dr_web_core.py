@@ -113,6 +113,12 @@ BACKBONE = "efficientnetb0"
 
 
 def resolve_model_path(root_dir: Path) -> Path:
+    env_model_path = os.getenv("MODEL_PATH", "").strip()
+    if env_model_path:
+        env_path = Path(env_model_path)
+        if env_path.exists():
+            return env_path
+
     improved_best_path = root_dir / "outputs_improved" / "best_model.keras"
     improved_final_path = root_dir / "outputs_improved" / "final_model.keras"
     best_path = root_dir / "outputs_run2" / "best_model.keras"
