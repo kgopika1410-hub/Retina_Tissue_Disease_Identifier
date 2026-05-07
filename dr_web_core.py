@@ -165,18 +165,35 @@ def predict_with_tta(x: np.ndarray) -> np.ndarray:
     return np.mean(preds, axis=0)
 
 
+def build_analysis_text(probabilities: np.ndarray, pred_idx: int, severity_idx: int, model_path: Path) -> str:
+    ordered = np.argsort(probabilities)[::-1]
+    lines = [
+        f"### Analysis",
+        f"Most likely class: **{CLASS_NAMES[pred_idx]}** ({probabilities[pred_idx] * 100:.1f}%)",
+        f"Estimated severity: **{CLASS_NAMES[severity_idx]}**",
+        f"Model used: `{model_path.name}`",
+        "",
+        "#### Class probabilities",
+    ]
+
+    for idx in ordered:
+        lines.append(f"- {CLASS_NAMES[idx]}: {probabilities[idx] * 100:.1f}%")
+
+    return "\n".join(lines)
+
+
 def predict_dr(
     image: np.ndarray,
     use_crop: bool,
     use_enhance: bool,
-) -> tuple[str, dict[str, float]]:
+) -> tuple[str, dict[str, float], str]:
     if image is None:
-        return "Please upload an image.", {}
+        return "Please upload an image.", {}, ""
 
     try:
         ensure_model_loaded()
     except (FileNotFoundError, RuntimeError) as exc:
-        return f"Error: {str(exc)}", {}
+        return f"Error: {str(exc)}", {}, f"### Analysis\n\n{str(exc)}"
 
     x = prepare_image(
         image_rgb=image,
@@ -199,6 +216,7 @@ def predict_dr(
     second_conf = float(probabilities[int(top2[1])])
 
     scores = {CLASS_NAMES[i]: float(probabilities[i]) for i in range(len(CLASS_NAMES))}
+    analysis_text = build_analysis_text(probabilities, pred_idx, severity_idx, LOADED_MODEL_PATH or MODEL_PATH or resolve_model_path(ROOT_DIR))
 
     if pred_conf < 0.55:
         message = (
@@ -212,7 +230,7 @@ def predict_dr(
             f"second class: {second_label}, confidence: {second_conf:.4f})"
         )
 
-    return message, scores
+    return message, scores, analysis_text
 
 
 def create_demo() -> gr.Blocks:
@@ -234,10 +252,12 @@ def create_demo() -> gr.Blocks:
                 prediction_text = gr.Textbox(label="Prediction", interactive=False)
                 class_scores = gr.Label(label="Class Probabilities")
 
+        analysis_md = gr.Markdown(label="Analysis")
+
         predict_btn.click(
             fn=predict_dr,
             inputs=[input_image, crop_checkbox, enhance_checkbox],
-            outputs=[prediction_text, class_scores],
+            outputs=[prediction_text, class_scores, analysis_md],
         )
 
     return demo
