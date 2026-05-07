@@ -61,11 +61,14 @@ def resolve_model_path(root_dir: Path) -> Path:
         if env_path.exists():
             return env_path
 
+    # Default priority: final_model first, then best_model.
     candidates = [
-        root_dir / "outputs_improved" / "best_model.keras",
         root_dir / "outputs_improved" / "final_model.keras",
-        root_dir / "outputs_run2" / "best_model.keras",
+        root_dir / "outputs_improved" / "best_model.keras",
         root_dir / "outputs_run2" / "final_model.keras",
+        root_dir / "outputs_run2" / "best_model.keras",
+        root_dir / "outputs" / "final_model.keras",
+        root_dir / "outputs" / "best_model.keras",
     ]
 
     for path in candidates:

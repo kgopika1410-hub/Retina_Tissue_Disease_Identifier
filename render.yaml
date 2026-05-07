@@ -6,6 +6,9 @@ services:
     startCommand: uvicorn dr_backend_api:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
+      - key: MODEL_PATH
+        scope: run_and_build
+        value: outputs_improved/final_model.keras
       - key: PYTHON_VERSION
         scope: run_and_build
         value: 3.11.9
