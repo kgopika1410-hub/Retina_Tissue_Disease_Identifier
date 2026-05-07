@@ -1,8 +1,7 @@
 services:
   - type: web
     name: dr-classifier
-    env: python
-    pythonVersion: 3.11
+    runtime: python
     buildCommand: pip install --no-cache-dir -r requirements.txt
     startCommand: python dr_inference_app.py
     plan: free
@@ -13,3 +12,6 @@ services:
       - key: GRADIO_SERVER_PORT
         scope: run_and_build
         value: 10000
+      - key: PYTHON_VERSION
+        scope: run_and_build
+        value: 3.11.9
