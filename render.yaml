@@ -6,12 +6,6 @@ services:
     startCommand: uvicorn dr_backend_api:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
-      - key: PORT
-        scope: run_and_build
-        value: 10000
-      - key: GRADIO_SERVER_PORT
-        scope: run_and_build
-        value: 10000
       - key: PYTHON_VERSION
         scope: run_and_build
         value: 3.11.9
