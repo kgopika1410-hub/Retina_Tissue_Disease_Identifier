@@ -1,14 +1,19 @@
+import os
 from pathlib import Path
 
+import gradio as gr
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse
 
 from dr_model_utils import decode_image_bytes, predict_image
+from dr_web_core import create_demo
+
+
+ROOT_DIR = Path(__file__).resolve().parent
 
 
 app = FastAPI(title="DR Detection API", version="1.0.0")
-ROOT_DIR = Path(__file__).resolve().parent
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,18 +51,12 @@ async def predict(
         return JSONResponse({"error": str(exc)}, status_code=400)
 
 
-@app.get("/")
-def root() -> HTMLResponse:
-    html = (
-        "<h2>Diabetic Retinopathy Service</h2>"
-        "<p>This endpoint serves the API only. The web UI (Gradio) is not being served by the current process.</p>"
-        "<p>To expose the web interface at the site root, set the service Start Command to <code>python dr_inference_app.py</code> in the Render dashboard and redeploy.</p>"
-        "<p>Or use the API endpoints: <a href=\"/health\">/health</a> and POST /predict (multipart form).</p>"
-    )
-    return HTMLResponse(content=html, status_code=200)
+demo = create_demo()
+app = gr.mount_gradio_app(app, demo, path="/")
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("dr_backend_api:app", host="127.0.0.1", port=8000, reload=False)
+    server_port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("dr_backend_api:app", host="0.0.0.0", port=server_port, reload=False)
