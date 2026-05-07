@@ -79,6 +79,12 @@ def load_model(model_path: Path) -> tf.keras.Model:
 
 ROOT_DIR = Path(__file__).resolve().parent
 
+# Global model variables (lazy loaded)
+MODEL = None
+MODEL_PATH = None
+LOADED_MODEL_PATH = None
+BACKBONE = "efficientnetb0"
+
 
 def resolve_model_path(root_dir: Path) -> Path:
     improved_best_path = root_dir / "outputs_improved" / "best_model.keras"
@@ -91,27 +97,32 @@ def resolve_model_path(root_dir: Path) -> Path:
         return improved_final_path
     if best_path.exists():
         return best_path
-    return final_path
+    if final_path.exists():
+        return final_path
+    return None
 
 
-MODEL_PATH = resolve_model_path(ROOT_DIR)
-BACKBONE = "efficientnetb0"
-MODEL = load_model(MODEL_PATH)
-LOADED_MODEL_PATH = MODEL_PATH
-
-
-def refresh_model_if_needed() -> None:
-    global MODEL, LOADED_MODEL_PATH
-    latest_model_path = resolve_model_path(ROOT_DIR)
-    if latest_model_path == LOADED_MODEL_PATH:
+def ensure_model_loaded() -> None:
+    """Load model on first use (lazy loading)."""
+    global MODEL, MODEL_PATH, LOADED_MODEL_PATH
+    
+    if MODEL is not None:
         return
-
+    
+    model_path = resolve_model_path(ROOT_DIR)
+    if model_path is None:
+        raise FileNotFoundError(
+            "No trained model found in outputs_improved or outputs_run2. "
+            "Please upload the model files to the service."
+        )
+    
     try:
-        MODEL = load_model(latest_model_path)
-        LOADED_MODEL_PATH = latest_model_path
-        print(f"Loaded updated model: {LOADED_MODEL_PATH}")
+        MODEL = load_model(model_path)
+        MODEL_PATH = model_path
+        LOADED_MODEL_PATH = model_path
+        print(f"✓ Loaded model: {model_path}")
     except Exception as exc:
-        print(f"Model refresh skipped: {exc}")
+        raise RuntimeError(f"Failed to load model: {exc}") from exc
 
 
 def predict_with_tta(x: np.ndarray) -> np.ndarray:
@@ -130,7 +141,10 @@ def predict_dr(
     if image is None:
         return "Please upload an image.", {}
 
-    refresh_model_if_needed()
+    try:
+        ensure_model_loaded()
+    except (FileNotFoundError, RuntimeError) as exc:
+        return f"Error: {str(exc)}", {}
 
     x = prepare_image(
         image_rgb=image,
@@ -196,8 +210,12 @@ with gr.Blocks(title="Diabetic Retinopathy Classifier") as demo:
 
 if __name__ == "__main__":
     server_port = int(os.getenv("GRADIO_SERVER_PORT", "7860"))
+    server_name = os.getenv("GRADIO_SERVER_NAME", "127.0.0.1")
+    # For Render deployment, bind to 0.0.0.0 to accept external connections
+    if os.getenv("RENDER"):
+        server_name = "0.0.0.0"
     demo.launch(
-        server_name="127.0.0.1",
+        server_name=server_name,
         server_port=server_port,
         show_error=True,
         prevent_thread_lock=False,

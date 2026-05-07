@@ -2,10 +2,10 @@ services:
   - type: web
     name: dr-classifier
     env: python
-    buildCommand: pip install -r requirements.txt
+    pythonVersion: 3.11
+    buildCommand: pip install --no-cache-dir -r requirements.txt
     startCommand: python dr_inference_app.py
     plan: free
-    healthCheckPath: /
     envVars:
       - key: PORT
         scope: run_and_build
