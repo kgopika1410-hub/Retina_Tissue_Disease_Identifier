@@ -6,7 +6,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import tensorflow as tf
 from PIL import Image
 
 
@@ -42,6 +41,9 @@ def enhance_image(image: np.ndarray) -> np.ndarray:
 
 
 def preprocess_for_backbone(image: np.ndarray, backbone: str) -> np.ndarray:
+    # Lazy-import TensorFlow to avoid heavy imports at module import time
+    import tensorflow as tf
+
     image_255 = image * 255.0
     if backbone == "resnet50":
         image_255 = tf.keras.applications.resnet50.preprocess_input(image_255)
@@ -77,11 +79,14 @@ _MODEL: tf.keras.Model | None = None
 _MODEL_PATH: Path | None = None
 
 
-def get_model(root_dir: Path) -> tuple[tf.keras.Model, Path]:
+def get_model(root_dir: Path) -> tuple["tf.keras.Model", Path]:
+    # Lazy-import TensorFlow and load model with compile=False for Keras 3 compatibility
     global _MODEL, _MODEL_PATH
+    import tensorflow as tf
+
     model_path = resolve_model_path(root_dir)
     if _MODEL is None or _MODEL_PATH != model_path:
-        _MODEL = tf.keras.models.load_model(model_path)
+        _MODEL = tf.keras.models.load_model(model_path, compile=False)
         _MODEL_PATH = model_path
     return _MODEL, model_path
 

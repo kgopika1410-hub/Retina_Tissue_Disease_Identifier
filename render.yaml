@@ -3,7 +3,7 @@ services:
     name: dr-classifier
     runtime: python
     buildCommand: pip install --no-cache-dir -r requirements.txt
-    startCommand: python dr_inference_app.py
+    startCommand: uvicorn dr_backend_api:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
       - key: PORT

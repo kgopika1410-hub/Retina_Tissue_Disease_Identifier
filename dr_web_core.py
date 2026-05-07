@@ -4,7 +4,6 @@ from pathlib import Path
 import cv2
 import gradio as gr
 import numpy as np
-import tensorflow as tf
 
 
 CLASS_NAMES = [
@@ -39,6 +38,9 @@ def enhance_image(image: np.ndarray) -> np.ndarray:
 
 
 def preprocess_for_backbone(image: np.ndarray, backbone: str) -> np.ndarray:
+    # Lazy-import TensorFlow to avoid heavy imports at module import time
+    import tensorflow as tf
+
     image_255 = image * 255.0
     if backbone == "resnet50":
         image_255 = tf.keras.applications.resnet50.preprocess_input(image_255)
@@ -71,9 +73,12 @@ def prepare_image(
     return np.expand_dims(image_ready, axis=0)
 
 
-def load_model(model_path: Path) -> tf.keras.Model:
+def load_model(model_path: Path) -> "tf.keras.Model":
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")
+    # Import TensorFlow lazily so importing this module doesn't require TF at startup
+    import tensorflow as tf
+
     return tf.keras.models.load_model(model_path, compile=False)
 
 
