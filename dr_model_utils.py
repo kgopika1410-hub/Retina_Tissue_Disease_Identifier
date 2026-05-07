@@ -86,7 +86,28 @@ def get_model(root_dir: Path) -> tuple["tf.keras.Model", Path]:
 
     model_path = resolve_model_path(root_dir)
     if _MODEL is None or _MODEL_PATH != model_path:
-        _MODEL = tf.keras.models.load_model(model_path, compile=False)
+        try:
+            _MODEL = tf.keras.models.load_model(model_path, compile=False)
+        except Exception as exc:
+            # Compatibility path for legacy BatchNormalization configs that include
+            # renorm-related fields unsupported by some Keras runtimes.
+            if "BatchNormalization" not in str(exc) and "renorm" not in str(exc):
+                raise
+
+            class CompatBatchNormalization(tf.keras.layers.BatchNormalization):
+                @classmethod
+                def from_config(cls, config):
+                    cfg = dict(config)
+                    cfg.pop("renorm", None)
+                    cfg.pop("renorm_clipping", None)
+                    cfg.pop("renorm_momentum", None)
+                    return super().from_config(cfg)
+
+            _MODEL = tf.keras.models.load_model(
+                model_path,
+                compile=False,
+                custom_objects={"BatchNormalization": CompatBatchNormalization},
+            )
         _MODEL_PATH = model_path
     return _MODEL, model_path
 
