@@ -1,4 +1,5 @@
 import os
+import threading
 from pathlib import Path
 
 import gradio as gr
@@ -26,18 +27,29 @@ app.add_middleware(
 
 app.state.model_loaded = False
 app.state.model_error = ""
+app.state.model_loading = False
 
 
 @app.on_event("startup")
 def warm_model() -> None:
-    try:
-        ensure_model_loaded()
-        app.state.model_loaded = True
-        app.state.model_error = ""
-    except Exception:
-        app.state.model_loaded = False
-        import traceback
-        app.state.model_error = traceback.format_exc()
+    def _load_model_async() -> None:
+        try:
+            ensure_model_loaded()
+            app.state.model_loaded = True
+            app.state.model_error = ""
+        except Exception:
+            app.state.model_loaded = False
+            import traceback
+
+            app.state.model_error = traceback.format_exc()
+        finally:
+            app.state.model_loading = False
+
+    if app.state.model_loaded or app.state.model_loading:
+        return
+
+    app.state.model_loading = True
+    threading.Thread(target=_load_model_async, daemon=True).start()
 
 
 @app.get("/health")
@@ -64,6 +76,7 @@ def status() -> JSONResponse:
     model_available = False
     model_state = "unknown"
     model_error = getattr(app.state, "model_error", "")
+    model_loading = bool(getattr(app.state, "model_loading", False))
     try:
         resolved_model_path = resolve_model_path(ROOT_DIR)
         model_available = resolved_model_path.exists()
@@ -75,6 +88,8 @@ def status() -> JSONResponse:
         model_loaded = bool(app.state.model_loaded or dr_web_core.MODEL is not None)
         if model_loaded:
             model_state = "loaded"
+        elif model_loading:
+            model_state = "loading"
         elif model_available:
             model_state = "available_not_loaded"
         else:
@@ -90,6 +105,7 @@ def status() -> JSONResponse:
         "model_path": model_path,
         "model_available": model_available,
         "model_loaded": model_loaded,
+        "model_loading": model_loading,
         "model_state": model_state,
         "backend_ready": model_loaded,
         "model_error": model_error,
@@ -108,8 +124,8 @@ async def predict(
         if not bool(app.state.model_loaded):
             return JSONResponse(
                 {
-                    "error": "Model is not loaded on the backend yet.",
-                    "status": "check /status for model_loaded and model_state",
+                    "error": "Model is not loaded yet.",
+                    "status": "check /status for model_loaded, model_loading, and model_state",
                 },
                 status_code=503,
             )
