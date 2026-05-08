@@ -86,31 +86,45 @@ def get_model(root_dir: Path) -> tuple["tf.keras.Model", Path]:
     # Lazy-import TensorFlow and load model with compile=False for Keras 3 compatibility
     global _MODEL, _MODEL_PATH
     import tensorflow as tf
+    try:
+        from keras.src.models.functional import Functional
+    except Exception:
+        Functional = None
 
     model_path = resolve_model_path(root_dir)
     if _MODEL is None or _MODEL_PATH != model_path:
-        try:
-            _MODEL = tf.keras.models.load_model(model_path, compile=False)
-        except Exception as exc:
-            # Compatibility path for legacy BatchNormalization configs that include
-            # renorm-related fields unsupported by some Keras runtimes.
-            if "BatchNormalization" not in str(exc) and "renorm" not in str(exc):
-                raise
+        class CompatBatchNormalization(tf.keras.layers.BatchNormalization):
+            @classmethod
+            def from_config(cls, config):
+                cfg = dict(config)
+                cfg.pop("renorm", None)
+                cfg.pop("renorm_clipping", None)
+                cfg.pop("renorm_momentum", None)
+                return super().from_config(cfg)
 
-            class CompatBatchNormalization(tf.keras.layers.BatchNormalization):
-                @classmethod
-                def from_config(cls, config):
-                    cfg = dict(config)
-                    cfg.pop("renorm", None)
-                    cfg.pop("renorm_clipping", None)
-                    cfg.pop("renorm_momentum", None)
-                    return super().from_config(cfg)
+        custom_objects = {"BatchNormalization": CompatBatchNormalization}
+        if Functional is not None:
+            custom_objects["Functional"] = Functional
 
-            _MODEL = tf.keras.models.load_model(
-                model_path,
-                compile=False,
-                custom_objects={"BatchNormalization": CompatBatchNormalization},
-            )
+        attempts = [
+            {"compile": False},
+            {"compile": False, "safe_mode": False},
+            {"compile": False, "custom_objects": custom_objects},
+            {"compile": False, "custom_objects": custom_objects, "safe_mode": False},
+        ]
+
+        last_exc = None
+        for kwargs in attempts:
+            try:
+                _MODEL = tf.keras.models.load_model(model_path, **kwargs)
+                break
+            except TypeError as exc:
+                last_exc = exc
+            except Exception as exc:
+                last_exc = exc
+
+        if _MODEL is None:
+            raise RuntimeError(f"Failed to load model from {model_path}: {last_exc}")
         _MODEL_PATH = model_path
     return _MODEL, model_path
 

@@ -78,6 +78,10 @@ def load_model(model_path: Path) -> "tf.keras.Model":
         raise FileNotFoundError(f"Model not found: {model_path}")
     # Import TensorFlow lazily so importing this module doesn't require TF at startup
     import tensorflow as tf
+    try:
+        from keras.src.models.functional import Functional
+    except Exception:
+        Functional = None
     import traceback
 
     print(f"Attempting to load model from {model_path}")
@@ -86,36 +90,44 @@ def load_model(model_path: Path) -> "tf.keras.Model":
     except Exception:
         pass
 
-    try:
-        return tf.keras.models.load_model(model_path, compile=False)
-    except Exception as exc:
-        print("Initial model load failed:", exc)
-        traceback.print_exc()
-        # Compatibility path for legacy BatchNormalization configs that include
-        # renorm-related fields unsupported by some Keras runtimes.
-        if "BatchNormalization" not in str(exc) and "renorm" not in str(exc):
-            raise
+    class CompatBatchNormalization(tf.keras.layers.BatchNormalization):
+        @classmethod
+        def from_config(cls, config):
+            cfg = dict(config)
+            cfg.pop("renorm", None)
+            cfg.pop("renorm_clipping", None)
+            cfg.pop("renorm_momentum", None)
+            return super().from_config(cfg)
 
-        class CompatBatchNormalization(tf.keras.layers.BatchNormalization):
-            @classmethod
-            def from_config(cls, config):
-                cfg = dict(config)
-                cfg.pop("renorm", None)
-                cfg.pop("renorm_clipping", None)
-                cfg.pop("renorm_momentum", None)
-                return super().from_config(cfg)
+    custom_objects = {"BatchNormalization": CompatBatchNormalization}
+    if Functional is not None:
+        custom_objects["Functional"] = Functional
 
+    attempts = [
+        ("standard", {"compile": False}),
+        ("safe_mode_false", {"compile": False, "safe_mode": False}),
+        ("compat_objects", {"compile": False, "custom_objects": custom_objects}),
+        (
+            "compat_objects_safe_mode_false",
+            {"compile": False, "custom_objects": custom_objects, "safe_mode": False},
+        ),
+    ]
+
+    last_exc = None
+    for attempt_name, kwargs in attempts:
         try:
-            print("Attempting compatibility load with CompatBatchNormalization")
-            return tf.keras.models.load_model(
-                model_path,
-                compile=False,
-                custom_objects={"BatchNormalization": CompatBatchNormalization},
-            )
-        except Exception as exc2:
-            print("Compatibility load failed:", exc2)
+            print(f"Attempting model load using {attempt_name}")
+            return tf.keras.models.load_model(model_path, **kwargs)
+        except TypeError as exc:
+            # Older/newer Keras builds may not accept safe_mode; try the next option.
+            print(f"Model load attempt '{attempt_name}' rejected kwargs:", exc)
+            last_exc = exc
+        except Exception as exc:
+            print(f"Model load attempt '{attempt_name}' failed:", exc)
             traceback.print_exc()
-            raise
+            last_exc = exc
+
+    raise RuntimeError(f"All model load attempts failed for {model_path}: {last_exc}")
 
 
 ROOT_DIR = Path(__file__).resolve().parent
