@@ -91,20 +91,71 @@ def get_model(root_dir: Path) -> tuple["tf.keras.Model", Path]:
     except Exception:
         Functional = None
 
+    def _strip_renorm(config: dict) -> dict:
+        cfg = dict(config)
+        cfg.pop("renorm", None)
+        cfg.pop("renorm_clipping", None)
+        cfg.pop("renorm_momentum", None)
+        return cfg
+
+    def _patch_batchnorm_deserialization() -> None:
+        bn_classes = [tf.keras.layers.BatchNormalization]
+        try:
+            from keras.src.layers.normalization.batch_normalization import BatchNormalization as KerasSrcBN
+
+            bn_classes.append(KerasSrcBN)
+        except Exception:
+            pass
+
+        seen = set()
+        for bn_cls in bn_classes:
+            if bn_cls in seen:
+                continue
+            seen.add(bn_cls)
+
+            if getattr(bn_cls, "_renorm_patch_applied", False):
+                continue
+
+            original_init = bn_cls.__init__
+            original_from_config = bn_cls.from_config.__func__
+
+            def patched_init(self, *args, __orig_init=original_init, **kwargs):
+                kwargs.pop("renorm", None)
+                kwargs.pop("renorm_clipping", None)
+                kwargs.pop("renorm_momentum", None)
+                return __orig_init(self, *args, **kwargs)
+
+            def patched_from_config(cls, config, __orig_from_config=original_from_config):
+                return __orig_from_config(cls, _strip_renorm(config))
+
+            bn_cls.__init__ = patched_init
+            bn_cls.from_config = classmethod(patched_from_config)
+            bn_cls._renorm_patch_applied = True
+
     model_path = resolve_model_path(root_dir)
     if _MODEL is None or _MODEL_PATH != model_path:
+        _patch_batchnorm_deserialization()
+
         class CompatBatchNormalization(tf.keras.layers.BatchNormalization):
+            def __init__(self, *args, **kwargs):
+                kwargs.pop("renorm", None)
+                kwargs.pop("renorm_clipping", None)
+                kwargs.pop("renorm_momentum", None)
+                super().__init__(*args, **kwargs)
+
             @classmethod
             def from_config(cls, config):
-                cfg = dict(config)
-                cfg.pop("renorm", None)
-                cfg.pop("renorm_clipping", None)
-                cfg.pop("renorm_momentum", None)
-                return super().from_config(cfg)
+                return super().from_config(_strip_renorm(config))
 
-        custom_objects = {"BatchNormalization": CompatBatchNormalization}
+        custom_objects = {
+            "BatchNormalization": CompatBatchNormalization,
+            "keras.layers.BatchNormalization": CompatBatchNormalization,
+            "keras.src.layers.normalization.batch_normalization.BatchNormalization": CompatBatchNormalization,
+        }
         if Functional is not None:
             custom_objects["Functional"] = Functional
+            custom_objects["keras.src.models.functional.Functional"] = Functional
+            custom_objects["keras.models.Functional"] = Functional
 
         attempts = [
             {"compile": False},
@@ -120,6 +171,38 @@ def get_model(root_dir: Path) -> tuple["tf.keras.Model", Path]:
                 break
             except TypeError as exc:
                 last_exc = exc
+            except Exception as exc:
+                last_exc = exc
+
+        if _MODEL is None:
+            try:
+                import tf_keras as legacy_keras
+
+                class LegacyCompatBatchNormalization(legacy_keras.layers.BatchNormalization):
+                    def __init__(self, *args, **kwargs):
+                        kwargs.pop("renorm", None)
+                        kwargs.pop("renorm_clipping", None)
+                        kwargs.pop("renorm_momentum", None)
+                        super().__init__(*args, **kwargs)
+
+                    @classmethod
+                    def from_config(cls, config):
+                        return super().from_config(_strip_renorm(config))
+
+                legacy_custom_objects = {
+                    "BatchNormalization": LegacyCompatBatchNormalization,
+                    "keras.layers.BatchNormalization": LegacyCompatBatchNormalization,
+                    "keras.src.layers.normalization.batch_normalization.BatchNormalization": LegacyCompatBatchNormalization,
+                }
+                if Functional is not None:
+                    legacy_custom_objects["Functional"] = Functional
+                    legacy_custom_objects["keras.src.models.functional.Functional"] = Functional
+
+                _MODEL = legacy_keras.models.load_model(
+                    model_path,
+                    compile=False,
+                    custom_objects=legacy_custom_objects,
+                )
             except Exception as exc:
                 last_exc = exc
 
