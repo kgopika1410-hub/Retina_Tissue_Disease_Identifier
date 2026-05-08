@@ -98,6 +98,43 @@ def get_model(root_dir: Path) -> tuple["tf.keras.Model", Path]:
         cfg.pop("renorm_momentum", None)
         return cfg
 
+    def _strip_quantization(config: dict) -> dict:
+        cfg = dict(config)
+        cfg.pop("quantization_config", None)
+        return cfg
+
+    def _patch_layer_quantization_deserialization() -> None:
+        dense_classes = [tf.keras.layers.Dense]
+        try:
+            from keras.src.layers.core.dense import Dense as KerasSrcDense
+
+            dense_classes.append(KerasSrcDense)
+        except Exception:
+            pass
+
+        seen = set()
+        for dense_cls in dense_classes:
+            if dense_cls in seen:
+                continue
+            seen.add(dense_cls)
+
+            if getattr(dense_cls, "_quant_patch_applied", False):
+                continue
+
+            original_init = dense_cls.__init__
+            original_from_config = dense_cls.from_config.__func__
+
+            def patched_init(self, *args, __orig_init=original_init, **kwargs):
+                kwargs.pop("quantization_config", None)
+                return __orig_init(self, *args, **kwargs)
+
+            def patched_from_config(cls, config, __orig_from_config=original_from_config):
+                return __orig_from_config(cls, _strip_quantization(config))
+
+            dense_cls.__init__ = patched_init
+            dense_cls.from_config = classmethod(patched_from_config)
+            dense_cls._quant_patch_applied = True
+
     def _patch_batchnorm_deserialization() -> None:
         bn_classes = [tf.keras.layers.BatchNormalization]
         try:
@@ -135,6 +172,7 @@ def get_model(root_dir: Path) -> tuple["tf.keras.Model", Path]:
     model_path = resolve_model_path(root_dir)
     if _MODEL is None or _MODEL_PATH != model_path:
         _patch_batchnorm_deserialization()
+        _patch_layer_quantization_deserialization()
 
         class CompatBatchNormalization(tf.keras.layers.BatchNormalization):
             def __init__(self, *args, **kwargs):
@@ -147,10 +185,22 @@ def get_model(root_dir: Path) -> tuple["tf.keras.Model", Path]:
             def from_config(cls, config):
                 return super().from_config(_strip_renorm(config))
 
+        class CompatDense(tf.keras.layers.Dense):
+            def __init__(self, *args, **kwargs):
+                kwargs.pop("quantization_config", None)
+                super().__init__(*args, **kwargs)
+
+            @classmethod
+            def from_config(cls, config):
+                return super().from_config(_strip_quantization(config))
+
         custom_objects = {
             "BatchNormalization": CompatBatchNormalization,
             "keras.layers.BatchNormalization": CompatBatchNormalization,
             "keras.src.layers.normalization.batch_normalization.BatchNormalization": CompatBatchNormalization,
+            "Dense": CompatDense,
+            "keras.layers.Dense": CompatDense,
+            "keras.src.layers.core.dense.Dense": CompatDense,
         }
         if Functional is not None:
             custom_objects["Functional"] = Functional
@@ -189,10 +239,22 @@ def get_model(root_dir: Path) -> tuple["tf.keras.Model", Path]:
                     def from_config(cls, config):
                         return super().from_config(_strip_renorm(config))
 
+                class LegacyCompatDense(legacy_keras.layers.Dense):
+                    def __init__(self, *args, **kwargs):
+                        kwargs.pop("quantization_config", None)
+                        super().__init__(*args, **kwargs)
+
+                    @classmethod
+                    def from_config(cls, config):
+                        return super().from_config(_strip_quantization(config))
+
                 legacy_custom_objects = {
                     "BatchNormalization": LegacyCompatBatchNormalization,
                     "keras.layers.BatchNormalization": LegacyCompatBatchNormalization,
                     "keras.src.layers.normalization.batch_normalization.BatchNormalization": LegacyCompatBatchNormalization,
+                    "Dense": LegacyCompatDense,
+                    "keras.layers.Dense": LegacyCompatDense,
+                    "keras.src.layers.core.dense.Dense": LegacyCompatDense,
                 }
                 if Functional is not None:
                     legacy_custom_objects["Functional"] = Functional
