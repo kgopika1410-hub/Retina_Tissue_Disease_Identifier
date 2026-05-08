@@ -25,6 +25,7 @@ app.add_middleware(
 
 
 app.state.model_loaded = False
+app.state.model_error = ""
 
 
 @app.on_event("startup")
@@ -32,8 +33,11 @@ def warm_model() -> None:
     try:
         ensure_model_loaded()
         app.state.model_loaded = True
+        app.state.model_error = ""
     except Exception:
         app.state.model_loaded = False
+        import traceback
+        app.state.model_error = traceback.format_exc()
 
 
 @app.get("/health")
@@ -59,6 +63,7 @@ def status() -> JSONResponse:
     model_loaded = False
     model_available = False
     model_state = "unknown"
+    model_error = getattr(app.state, "model_error", "")
     try:
         resolved_model_path = resolve_model_path(ROOT_DIR)
         model_available = resolved_model_path.exists()
@@ -86,6 +91,8 @@ def status() -> JSONResponse:
         "model_available": model_available,
         "model_loaded": model_loaded,
         "model_state": model_state,
+        "backend_ready": model_loaded,
+        "model_error": model_error,
     }
     return JSONResponse(info)
 
@@ -98,6 +105,15 @@ async def predict(
     use_tta: bool = Form(True),
 ) -> JSONResponse:
     try:
+        if not bool(app.state.model_loaded):
+            return JSONResponse(
+                {
+                    "error": "Model is not loaded on the backend yet.",
+                    "status": "check /status for model_loaded and model_state",
+                },
+                status_code=503,
+            )
+
         content = await file.read()
         image_rgb = decode_image_bytes(content)
         # attempt to surface which model is loaded for diagnostics
