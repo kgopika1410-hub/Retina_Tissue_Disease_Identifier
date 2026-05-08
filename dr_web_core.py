@@ -267,7 +267,8 @@ def create_demo() -> gr.Blocks:
                 prediction_text = gr.Textbox(label="Prediction", interactive=False)
                 class_scores = gr.Label(label="Class Probabilities")
 
-        analysis_md = gr.Markdown(label="Analysis")
+        with gr.Row():
+            analysis_md = gr.Markdown(value="### Analysis\nNo prediction yet.", label="Analysis")
 
         predict_btn.click(
             fn=predict_dr,
