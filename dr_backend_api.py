@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from dr_model_utils import decode_image_bytes, predict_image
-from dr_web_core import create_demo
+from dr_web_core import create_demo, ensure_model_loaded
 
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -24,6 +24,18 @@ app.add_middleware(
 )
 
 
+app.state.model_loaded = False
+
+
+@app.on_event("startup")
+def warm_model() -> None:
+    try:
+        ensure_model_loaded()
+        app.state.model_loaded = True
+    except Exception:
+        app.state.model_loaded = False
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
@@ -32,31 +44,48 @@ def health() -> dict:
 @app.get("/status")
 def status() -> JSONResponse:
     import subprocess
-    import json
     import tensorflow as tf
+
+    from dr_model_utils import resolve_model_path
+    import dr_web_core
 
     commit = None
     try:
-        commit = (
-            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]) .decode().strip()
-        )
+        commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
     except Exception:
         commit = None
 
     model_path = None
+    model_loaded = False
+    model_available = False
+    model_state = "unknown"
     try:
-        # dr_web_core exports LOADED_MODEL_PATH when model is loaded
-        from dr_web_core import LOADED_MODEL_PATH
-
-        model_path = str(LOADED_MODEL_PATH) if LOADED_MODEL_PATH is not None else None
+        resolved_model_path = resolve_model_path(ROOT_DIR)
+        model_available = resolved_model_path.exists()
+        model_path = str(resolved_model_path)
     except Exception:
         model_path = None
+
+    try:
+        model_loaded = bool(app.state.model_loaded or dr_web_core.MODEL is not None)
+        if model_loaded:
+            model_state = "loaded"
+        elif model_available:
+            model_state = "available_not_loaded"
+        else:
+            model_state = "missing"
+    except Exception:
+        model_loaded = False
+        model_state = "unknown"
 
     info = {
         "commit": commit,
         "tensorflow": tf.__version__,
         "keras": tf.keras.__version__,
         "model_path": model_path,
+        "model_available": model_available,
+        "model_loaded": model_loaded,
+        "model_state": model_state,
     }
     return JSONResponse(info)
 
@@ -90,6 +119,8 @@ async def predict(
             result.setdefault("_debug", {})
             result["_debug"]["loaded_model_path"] = loaded_path
             result["_debug"]["model_candidates_env"] = os.getenv("MODEL_PATH", "")
+            result["_debug"]["model_loaded"] = bool(loaded_path)
+            result["_debug"]["backend_warmed"] = bool(app.state.model_loaded)
         return JSONResponse(result)
     except Exception as exc:
         import traceback
